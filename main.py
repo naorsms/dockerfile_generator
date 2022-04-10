@@ -1,6 +1,6 @@
 import argparse
 import logging
-import re
+
 
 handler = logging.StreamHandler()
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s:%(filename)s:%(lineno)s: %(message)s")
@@ -11,10 +11,70 @@ logger.addHandler(handler)
 
 
 class DockerService:
-    with open('Dockerfile') as dockerfile_unp:
-        dockerfile = list(dockerfile_unp)
-    with open('startup.sh') as startupsh_unp:
-        startup_sh = list(startupsh_unp)
+    DOCKERFILE_TEMPLATE_NAME = "TemplateDockerfile"
+    STARTUP_SH_TEMPLATE_NAME = "TemplateStartup.sh"
+    ENV_PACKAGES = {
+        'prd': ['nginx'],
+        'stg': ['nginx'],
+        'dev': [
+            'curl',
+            'vim',
+            'ping',
+            'traceroute',
+            'wget',
+            'nginx'
+        ]
+    }
+    PYTHON_ENV_INSTRUCTIONS = '''
+RUN python3 -m venv /dockerfileGen    
+ENV PATH="/dockerfileGen/bin:$PATH"
+RUN pip3 install --no-cache-dir -r requirements.txt
+'''
+    GUNICORN_CONF = {
+        'prd': ['4'],
+        'stg': ['3'],
+        'dev': ['2']
+    }
+    GUNICORN_ACTIVATION = '''
+. /dockerfileGen/bin/activate
+nohup gunicorn -w {env_level_num} --threads {env_level_num} --bind unix:/run/ipc.sock wsgi:app &
+'''
+
+    def generate_dockerfile(self, packages=None, setup_python_env=False):
+        if packages is None:
+            packages = ['nginx']
+
+        env_instructions = ''
+        if setup_python_env:
+            env_instructions = DockerService.PYTHON_ENV_INSTRUCTIONS
+            packages.extend([
+                'python3.8',
+                'python3-pip',
+                'python3-venv',
+            ])
+        with open(DockerService.DOCKERFILE_TEMPLATE_NAME) as template_file:
+            dockerfile_content = template_file.read().format(
+                packages=' '.join(packages),
+                python_env_instructions=env_instructions,
+            )
+
+        with open('Dockerfile', 'w') as output_dockerfile:
+            output_dockerfile.write(dockerfile_content)
+
+    def generate_startupfile(self, gunicorn_activation=None):
+
+        if gunicorn_activation is None:
+            gunicorn_activation = ''
+        if gunicorn_activation:
+            gunicorn_activation = DockerService.GUNICORN_ACTIVATION
+            gunicorn_activation = gunicorn_activation.format(
+                env_level_num=DockerService.GUNICORN_CONF[self.environment_level])
+        with open(DockerService.STARTUP_SH_TEMPLATE_NAME) as template_file:
+            startup_sh_content = template_file.read().format(
+                gunicorn_activation=gunicorn_activation
+            )
+        with open('startup.sh', 'w') as output_startup_sh:
+            output_startup_sh.write(startup_sh_content)
 
     def __init__(self, environment_level):
         self.environment_level = environment_level
@@ -25,102 +85,17 @@ class Frontend(DockerService):
         super().__init__(environment_level)
 
     def generate(self):
-        f_df = open("Dockerfile1", "w")
-        f_st = open("startup1.sh", "w")
-
-        if self.environment_level == "prd":
-            for line in self.dockerfile:
-                if not re.search("(#)",line):
-                    f_df.write(line)
-            f_st.write(self.startup_sh[0])
-            for line in self.startup_sh[1:]:
-                if not re.search("(#)", line):
-                    f_st.write(line)
-
-        elif self.environment_level == "stg":
-            for line in self.dockerfile:
-                if not re.search("(#)", line):
-                    f_df.write(line)
-            f_st.write(self.startup_sh[0])
-            for line in self.startup_sh[1:]:
-                if not re.search("(#)", line):
-                    f_st.write(line)
-
-        elif self.environment_level == "dev":
-            for line in self.dockerfile:
-                if re.search("(#)", line):
-                    if re.search("(curl|vim|ping|traceroute|wget)", line):
-                        line_temp = line.replace("#", " ")
-                        f_df.write(line_temp)
-                else:
-                    f_df.write(line)
-            f_st.write(self.startup_sh[0])
-            for line in self.startup_sh[1:]:
-                if not re.search("(#)", line):
-                    f_st.write(line)
+        self.generate_dockerfile(packages=self.ENV_PACKAGES[self.environment_level])
+        self.generate_startupfile()
 
 
 class Backend(DockerService):
+    def __init__(self, environment_level):
+        super().__init__(environment_level)
+
     def generate(self):
-        f_df = open("Dockerfile1", "w")
-        f_st = open("startup1.sh", "w")
-
-        if self.environment_level == "prd":
-            for line in self.dockerfile:
-                if re.search("(#)", line):
-                    if re.search("(python|pip|PATH)", line):
-                        line_temp = line.replace("#", " ")
-                        f_df.write(line_temp)
-                else:
-                    f_df.write(line)
-            f_st.write(self.startup_sh[0])
-            for line in self.startup_sh[1:]:
-                if re.search("(#)", line):
-                    if re.search("(gunicorn)", line):
-                        f_st.write("nohup gunicorn -w 4 --threads 4 --bind unix:/run/ipc.sock wsgi:app &\n")
-                    else:
-                        line_temp = line.replace("#", "")
-                        f_st.write(line_temp)
-                else:
-                    f_st.write(line)
-
-        elif self.environment_level == "stg":
-            for line in self.dockerfile:
-                if re.search("(#)", line):
-                    if re.search("(python|pip|PATH)", line):
-                        line_temp = line.replace("#", " ")
-                        f_df.write(line_temp)
-                else:
-                    f_df.write(line)
-            f_st.write(self.startup_sh[0])
-            for line in self.startup_sh[1:]:
-                if re.search("(#)", line):
-                    if re.search("(gunicorn)", line):
-                        f_st.write("nohup gunicorn -w 3 --threads 3 --bind unix:/run/ipc.sock wsgi:app &\n")
-                    else:
-                        line_temp = line.replace("#", "")
-                        f_st.write(line_temp)
-                else:
-                    f_st.write(line)
-        elif self.environment_level == "dev":
-            for line in self.dockerfile:
-                if re.search("(#)", line):
-                    if re.search("(python|curl|vim|ping|traceroute|wget|pip|PATH)", line):
-                        line_temp = line.replace("#", " ")
-                        f_df.write(line_temp)
-                else:
-                    f_df.write(line)
-            f_st.write(self.startup_sh[0])
-            for line in self.startup_sh[1:]:
-                if re.search("(#)", line):
-                    if re.search("(gunicorn)", line):
-                        f_st.write("nohup gunicorn -w 2 --threads 2 --bind unix:/run/ipc.sock wsgi:app &\n")
-                    else:
-                        line_temp = line.replace("#", "")
-                        f_st.write(line_temp)
-
-                else:
-                    f_st.write(line)
+        self.generate_dockerfile(packages=self.ENV_PACKAGES[self.environment_level], setup_python_env=True)
+        self.generate_startupfile(gunicorn_activation=self.GUNICORN_ACTIVATION)
 
 
 class ServiceDeployer:
