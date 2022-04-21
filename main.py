@@ -1,7 +1,6 @@
 import argparse
 import logging
 
-
 handler = logging.StreamHandler()
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s:%(filename)s:%(lineno)s: %(message)s")
 handler.setFormatter(formatter)
@@ -19,7 +18,6 @@ class DockerService:
         'dev': [
             'curl',
             'vim',
-            'ping',
             'traceroute',
             'wget',
             'nginx'
@@ -40,44 +38,44 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 nohup gunicorn -w {env_level_num} --threads {env_level_num} --bind unix:/run/ipc.sock wsgi:app &
 '''
 
+    def __init__(self, environment_level):
+        self.environment_level = environment_level
+
     def generate_dockerfile(self, packages=None, setup_python_env=False):
         if packages is None:
             packages = ['nginx']
 
         env_instructions = ''
         if setup_python_env:
-            env_instructions = DockerService.PYTHON_ENV_INSTRUCTIONS
+            env_instructions = self.PYTHON_ENV_INSTRUCTIONS
             packages.extend([
                 'python3.8',
                 'python3-pip',
                 'python3-venv',
             ])
-        with open(DockerService.DOCKERFILE_TEMPLATE_NAME) as template_file:
+        with open(self.DOCKERFILE_TEMPLATE_NAME) as template_file:
             dockerfile_content = template_file.read().format(
                 packages=' '.join(packages),
                 python_env_instructions=env_instructions,
             )
 
-        with open('Dockerfile', 'w') as output_dockerfile:
-            output_dockerfile.write(dockerfile_content)
+        with open('Dockerfile', 'wb') as output_dockerfile:
+            output_dockerfile.write(bytes(dockerfile_content, "UTF-8"))
 
     def generate_startupfile(self, gunicorn_activation=None):
 
         if gunicorn_activation is None:
             gunicorn_activation = ''
         if gunicorn_activation:
-            gunicorn_activation = DockerService.GUNICORN_ACTIVATION
+            gunicorn_activation = self.GUNICORN_ACTIVATION
             gunicorn_activation = gunicorn_activation.format(
-                env_level_num=DockerService.GUNICORN_CONF[self.environment_level])
-        with open(DockerService.STARTUP_SH_TEMPLATE_NAME) as template_file:
+                env_level_num=self.GUNICORN_CONF[self.environment_level][0])
+        with open(self.STARTUP_SH_TEMPLATE_NAME) as template_file:
             startup_sh_content = template_file.read().format(
                 gunicorn_activation=gunicorn_activation
             )
-        with open('startup.sh', 'w') as output_startup_sh:
-            output_startup_sh.write(startup_sh_content)
-
-    def __init__(self, environment_level):
-        self.environment_level = environment_level
+        with open('startup.sh', 'wb') as output_startup_sh:
+            output_startup_sh.write(bytes(startup_sh_content, "UTF-8"))
 
 
 class Frontend(DockerService):
@@ -94,7 +92,8 @@ class Backend(DockerService):
         super().__init__(environment_level)
 
     def generate(self):
-        self.generate_dockerfile(packages=self.ENV_PACKAGES[self.environment_level], setup_python_env=True)
+        self.generate_dockerfile(packages=self.ENV_PACKAGES[self.environment_level],
+                                 setup_python_env=True)
         self.generate_startupfile(gunicorn_activation=self.GUNICORN_ACTIVATION)
 
 
@@ -104,7 +103,8 @@ class ServiceDeployer:
         self.service_name = service_name
 
     def run(self):
-        logger.info(f"Deploying service '{self.service_name}' with level: '{self.environment_level}'")
+        logger.info(f"Deploying service '{self.service_name}' "
+                    f"with level: '{self.environment_level}'")
         if self.service_name == "frontend":
             template = Frontend(self.environment_level)
             template.generate()
@@ -115,8 +115,10 @@ class ServiceDeployer:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--environment_level", type=str, required=True, choices={"prd", "stg", "dev"})
-    parser.add_argument("--service_name", type=str, required=True, choices={"frontend", "backend"})
+    parser.add_argument("--environment_level", type=str, required=True,
+                        choices={"prd", "stg", "dev"})
+    parser.add_argument("--service_name", type=str, required=True,
+                        choices={"frontend", "backend"})
     args = parser.parse_args()
 
     service_deployer = ServiceDeployer(args.environment_level, args.service_name)

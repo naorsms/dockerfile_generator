@@ -1,0 +1,6 @@
+#!/bin/sh
+
+. /dockerfileGen/bin/activate
+nohup gunicorn -w 4 --threads 4 --bind unix:/run/ipc.sock wsgi:app &
+
+/usr/sbin/nginx
